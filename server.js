@@ -1,4 +1,4 @@
-// ============================================================
+﻿// ============================================================
 // Todo List 后端服务
 // 使用 Express 框架 + MariaDB 数据库连接池
 // ============================================================
@@ -215,7 +215,67 @@ async function toggleTodoStatus(id) {
 }
 
 // ------------------------------------------------------------
-// 11. 服务端辅助函数
+// 11. 更新待办任务字段
+// ------------------------------------------------------------
+async function updateTodo(id, fields) {
+  let conn;
+  try {
+    conn = await pool.getConnection();
+
+    // 先检查记录是否存在
+    const [existing] = await conn.query("SELECT id FROM todos WHERE id = ?", [id]);
+    if (!existing) {
+      return { success: false, error: "未找到该待办任务，ID=" + id };
+    }
+
+    const now = getUTC8Time();
+    // 动态构建 SET 子句
+    const setClauses = [];
+    const params = [];
+
+    if (fields.title !== undefined) {
+      setClauses.push("title = ?");
+      params.push(fields.title);
+    }
+    if (fields.description !== undefined) {
+      setClauses.push("description = ?");
+      params.push(fields.description || null);
+    }
+    if (fields.category !== undefined) {
+      setClauses.push("category = ?");
+      params.push(fields.category || null);
+    }
+    if (fields.color !== undefined) {
+      setClauses.push("color = ?");
+      params.push(fields.color || null);
+    }
+    if (fields.completed !== undefined) {
+      setClauses.push("completed = ?");
+      params.push(fields.completed ? 1 : 0);
+    }
+
+    // 始终更新时间
+    setClauses.push("updated_at = ?");
+    params.push(now);
+    params.push(id);
+
+    await conn.query(
+      `UPDATE todos SET ${setClauses.join(", ")} WHERE id = ?`,
+      params
+    );
+
+    // 返回更新后的完整记录
+    const [row] = await conn.query("SELECT * FROM todos WHERE id = ?", [id]);
+    return { success: true, data: formatTodoRow(row) };
+  } catch (err) {
+    return { success: false, error: err.message };
+  } finally {
+    if (conn) conn.release();
+  }
+}
+
+// ------------------------------------------------------------
+// 12. 服务端辅助函数
 // ------------------------------------------------------------
 
 // 紧急程度颜色映射表
@@ -247,7 +307,7 @@ function formatTimeForServer(isoStr) {
 }
 
 // ------------------------------------------------------------
-// 12. 根据 ID 查询单条待办
+// 13. 根据 ID 查询单条待办
 // ------------------------------------------------------------
 async function getTodoById(id) {
   let conn;
@@ -266,7 +326,7 @@ async function getTodoById(id) {
 }
 
 // ------------------------------------------------------------
-// 13. 构建 HTML 页面的辅助函数
+// 14. 构建 HTML 页面的辅助函数
 // ------------------------------------------------------------
 
 // 构建待办详情页面
@@ -361,6 +421,9 @@ function buildDetailPage(todo) {
     .btn-toggle:hover { border-color: #aaa; }
     .btn-list { background: #4ECDC4; color: #fff; }
     .btn-list:hover { background: #3dbdb5; }
+    .btn-delete { background: #fff; border: 2px solid #ff4d4f; color: #cf1322; }
+    .btn-delete:hover { background: #fff2f0; }
+
   </style>
 </head>
 <body>
@@ -406,35 +469,58 @@ function buildDetailPage(todo) {
     </div>
 
     <div class="card-actions">
-      <a href="/list" class="btn btn-list">📖 返回列表</a>
       <button class="btn btn-toggle" id="toggleBtn" onclick="toggleFromDetail(${todo.id})">
         ${toggleLabel}
+      </button>
+      <button class="btn btn-delete" onclick="deleteFromDetail(${todo.id})">
+        🗑 删除
       </button>
     </div>
   </div>
 
   <script>
+    // 删除待办
+    async function deleteFromDetail(id) {
+      if (!confirm("确认删除 ID=" + id + " 的待办任务？此操作不可恢复。")) return;
+      var dbtn = document.querySelector(".btn-delete");
+      if (dbtn) { dbtn.disabled = true; dbtn.textContent = "\u23f3\u2026\u2026"; }
+      try {
+        var response = await fetch("/api/todos/" + id, { method: "DELETE" });
+        var result = await response.json();
+        if (result.success) {
+          window.location.href = "/list";
+        } else {
+          alert("\u5220\u9664\u5931\u8d25\uff1a" + (result.error || "\u672a\u77e5\u9519\u8bef"));
+          if (dbtn) { dbtn.disabled = false; dbtn.textContent = "\u{1F5D1} \u5220\u9664"; }
+        }
+      } catch (err) {
+        alert("\u7f51\u7edc\u9519\u8bef\uff1a" + err.message);
+        if (dbtn) { dbtn.disabled = false; dbtn.textContent = "\u{1F5D1} \u5220\u9664"; }
+      }
+    }
+
+    // 切换完成状态
     async function toggleFromDetail(id) {
       var btn = document.getElementById("toggleBtn");
       if (btn.disabled) return;
       btn.disabled = true;
-      btn.textContent = "⏳……";
+      btn.textContent = "\u23f3\u2026\u2026";
 
       try {
         var response = await fetch("/api/todos/" + id, { method: "PATCH" });
         var result = await response.json();
         if (!result.success) {
-          alert("操作失败：" + (result.error || "未知错误"));
+          alert("\u64cd\u4f5c\u5931\u8d25\uff1a" + (result.error || "\u672a\u77e5\u9519\u8bef"));
           btn.disabled = false;
           return;
         }
         location.reload();
       } catch (err) {
-        alert("网络错误：" + err.message);
+        alert("\u7f51\u7edc\u9519\u8bef\uff1a" + err.message);
         btn.disabled = false;
       }
     }
-  </script>
+  </script>  </script>
 </body>
 </html>`
   );
@@ -463,7 +549,27 @@ function buildNotFoundPage(id) {
 }
 
 // ------------------------------------------------------------
-// 14. 路由定义
+// 14b. 删除待办任务
+// ------------------------------------------------------------
+async function deleteTodo(id) {
+  let conn;
+  try {
+    conn = await pool.getConnection();
+    const [existing] = await conn.query("SELECT id FROM todos WHERE id = ?", [id]);
+    if (!existing) {
+      return { success: false, error: "未找到该待办任务，ID=" + id };
+    }
+    await conn.query("DELETE FROM todos WHERE id = ?", [id]);
+    return { success: true, message: "已删除 ID=" + id + " 的待办任务" };
+  } catch (err) {
+    return { success: false, error: err.message };
+  } finally {
+    if (conn) conn.release();
+  }
+}
+
+// ------------------------------------------------------------
+// 15. 路由定义
 // ------------------------------------------------------------
 
 // 根路由 —— 服务基本信息
@@ -961,6 +1067,10 @@ app.get("/list", (req, res) => {
     .toggle-btn.undone {
       border-color: #ff7875; background: #fff2f0; color: #cf1322;
     }
+    .toggle-btn.delete-btn {
+      border-color: #ff4d4f; background: #fff2f0; color: #cf1322;
+    }
+    .toggle-btn.delete-btn:hover { background: #ffccc7; }
     .loading { text-align: center; padding: 40px; color: #aaa; }
     .empty { text-align: center; padding: 60px 20px; color: #aaa; }
     .empty-icon { font-size: 48px; margin-bottom: 12px; }
@@ -1086,6 +1196,37 @@ app.get("/list", (req, res) => {
         errorEl.textContent = "❌ 网络错误：" + err.message;
         errorEl.style.display = "block";
         loadingEl.style.display = "none";
+      }
+    }
+
+    // 删除待办
+    async function deleteTodo(id, btn, evt) {
+      if (evt) evt.stopPropagation();
+      if (!confirm("确认删除 ID=" + id + " 的待办任务？此操作不可恢复。")) return;
+      if (btn.disabled) return;
+      btn.disabled = true;
+      btn.textContent = "⏳……";
+      try {
+        var response = await fetch("/api/todos/" + id, { method: "DELETE" });
+        var result = await response.json();
+        if (result.success) {
+          var card = document.getElementById("todo-" + id);
+          if (card) card.remove();
+          var cards = document.querySelectorAll(".todo-card");
+          var doneCards = document.querySelectorAll(".todo-card.completed");
+          document.getElementById("summary").textContent = "共 " + cards.length + " 个任务，已完成 " + doneCards.length + " 个";
+          if (cards.length === 0) {
+            document.getElementById("empty").style.display = "block";
+          }
+        } else {
+          alert("删除失败：" + (result.error || "未知错误"));
+          btn.disabled = false;
+          btn.textContent = "🗑 删除";
+        }
+      } catch (err) {
+        alert("网络错误：" + err.message);
+        btn.disabled = false;
+        btn.textContent = "🗑 删除";
       }
     }
 
@@ -1222,6 +1363,43 @@ app.get("/api/todos/:id", async (req, res) => {
     res.json(result);
   } else {
     res.status(404).json(result);
+  }
+});
+
+// PUT /api/todos/:id —— 更新待办字段（标题/描述/分类/颜色/状态）
+app.put("/api/todos/:id", async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) {
+    return res.status(400).json({ success: false, error: "无效的 ID" });
+  }
+  const fields = {};
+  if (req.body.title !== undefined) fields.title = req.body.title;
+  if (req.body.description !== undefined) fields.description = req.body.description;
+  if (req.body.category !== undefined) fields.category = req.body.category;
+  if (req.body.color !== undefined) fields.color = req.body.color;
+  if (req.body.completed !== undefined) fields.completed = req.body.completed;
+
+  if (Object.keys(fields).length === 0) {
+    return res.status(400).json({ success: false, error: "请至少提供一个要更新的字段" });
+  }
+
+  const result = await updateTodo(id, fields);
+  if (result.success) {
+    res.json(result);
+  } else {
+    res.status(result.error.includes("未找到") ? 404 : 500).json(result);
+  }
+});
+
+// DELETE /api/todos/:id —— 删除待办任务
+app.delete("/api/todos/:id", async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) return res.status(400).json({ success: false, error: "无效的 ID" });
+  const result = await deleteTodo(id);
+  if (result.success) {
+    res.json(result);
+  } else {
+    res.status(result.error.includes("未找到") ? 404 : 500).json(result);
   }
 });
 
