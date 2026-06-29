@@ -520,7 +520,10 @@ function buildDetailPage(todo) {
         btn.disabled = false;
       }
     }
-  </script>  </script>
+  </script>
+
+
+  <div style="position:fixed; bottom:0; left:0; width:100%; text-align:center; color:#aaa; font-size:12px; padding:12px 0; background:#fff; z-index:9999; box-shadow:0 -2px 8px rgba(0,0,0,0.06);">EBS Workstation Todo List By PRC-Leo</div>
 </body>
 </html>`
   );
@@ -543,6 +546,10 @@ function buildNotFoundPage(id) {
   <h1>📭 待办不存在</h1>
   <p>未找到 ID 为 ${id} 的任务。</p>
   <p><a href="/list">← 返回列表</a></p>
+
+  <div style="position:fixed; bottom:0; left:0; width:100%; text-align:center; color:#aaa; font-size:12px; padding:12px 0; background:#fff; z-index:9999; box-shadow:0 -2px 8px rgba(0,0,0,0.06);">EBS Workstation Todo List By PRC-Leo</div>
+
+  <div style="position:fixed; bottom:0; left:0; width:100%; text-align:center; color:#aaa; font-size:12px; padding:12px 0; background:#fff; z-index:9999; box-shadow:0 -2px 8px rgba(0,0,0,0.06);">EBS Workstation Todo List By PRC-Leo</div>
 </body>
 </html>`
   );
@@ -700,6 +707,8 @@ app.get("/", (req, res) => {
       }
     })();
   </script>
+
+  <div style="position:fixed; bottom:0; left:0; width:100%; text-align:center; color:#aaa; font-size:12px; padding:12px 0; background:#fff; z-index:9999; box-shadow:0 -2px 8px rgba(0,0,0,0.06);">EBS Workstation Todo List By PRC-Leo</div>
 </body>
 </html>
   `);
@@ -1109,6 +1118,10 @@ app.get("/add", (req, res) => {
       }
     });
   </script>
+
+  <div style="position:fixed; bottom:0; left:0; width:100%; text-align:center; color:#aaa; font-size:12px; padding:12px 0; background:#fff; z-index:9999; box-shadow:0 -2px 8px rgba(0,0,0,0.06);">EBS Workstation Todo List By PRC-Leo</div>
+
+  <div style="position:fixed; bottom:0; left:0; width:100%; text-align:center; color:#aaa; font-size:12px; padding:12px 0; background:#fff; z-index:9999; box-shadow:0 -2px 8px rgba(0,0,0,0.06);">EBS Workstation Todo List By PRC-Leo</div>
 </body>
 </html>
   `);
@@ -1422,6 +1435,10 @@ app.get("/list", (req, res) => {
     // 页面加载时获取列表
     loadTodos();
   </script>
+
+  <div style="position:fixed; bottom:0; left:0; width:100%; text-align:center; color:#aaa; font-size:12px; padding:12px 0; background:#fff; z-index:9999; box-shadow:0 -2px 8px rgba(0,0,0,0.06);">EBS Workstation Todo List By PRC-Leo</div>
+
+  <div style="position:fixed; bottom:0; left:0; width:100%; text-align:center; color:#aaa; font-size:12px; padding:12px 0; background:#fff; z-index:9999; box-shadow:0 -2px 8px rgba(0,0,0,0.06);">EBS Workstation Todo List By PRC-Leo</div>
 </body>
 </html>
   `);
