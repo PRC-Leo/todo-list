@@ -573,12 +573,136 @@ async function deleteTodo(id) {
 // ------------------------------------------------------------
 
 // 根路由 —— 服务基本信息
+// 根路由 —— 欢迎首页 GUI
 app.get("/", (req, res) => {
-  res.json({
-    message: "欢迎访问Todo-List by PRC-Leo",
-    version: "1.0.0",
-    status: "运行中",
-  });
+  res.send(`
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EBS 待办工作站</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+      background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      overflow: hidden;
+    }
+    /* 背景粒子动画 */
+    .particles {
+      position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+      pointer-events: none; z-index: 0;
+    }
+    .particle {
+      position: absolute;
+      background: rgba(255,255,255,0.08);
+      border-radius: 50%;
+      animation: float linear infinite;
+    }
+    @keyframes float {
+      0% { transform: translateY(100vh) scale(0); opacity: 0; }
+      10% { opacity: 1; }
+      90% { opacity: 1; }
+      100% { transform: translateY(-10vh) scale(1); opacity: 0; }
+    }
+    .main-content {
+      position: relative; z-index: 1;
+      text-align: center;
+    }
+    .welcome-text {
+      font-size: 42px;
+      font-weight: 700;
+      color: #ffffff;
+      margin-bottom: 8px;
+      opacity: 0;
+      animation: fadeInUp 1.2s ease-out 0.3s forwards;
+      text-shadow: 0 2px 20px rgba(78,205,196,0.4);
+    }
+    .welcome-sub {
+      font-size: 18px;
+      color: rgba(255,255,255,0.65);
+      margin-bottom: 48px;
+      opacity: 0;
+      animation: fadeInUp 1.2s ease-out 0.8s forwards;
+      letter-spacing: 2px;
+    }
+    .btn-start {
+      display: inline-block;
+      padding: 16px 56px;
+      font-size: 18px;
+      font-weight: 600;
+      color: #1a1a2e;
+      background: linear-gradient(135deg, #4ECDC4, #44b8b0);
+      border: none;
+      border-radius: 50px;
+      cursor: pointer;
+      text-decoration: none;
+      opacity: 0;
+      animation: fadeInUp 1.2s ease-out 1.3s forwards;
+      transition: all 0.3s;
+      box-shadow: 0 8px 32px rgba(78,205,196,0.3);
+      letter-spacing: 1px;
+    }
+    .btn-start:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 12px 40px rgba(78,205,196,0.5);
+      background: linear-gradient(135deg, #5ddbd3, #4ECDC4);
+    }
+    .btn-start:active { transform: translateY(0); }
+    @keyframes fadeInUp {
+      0% { opacity: 0; transform: translateY(30px); }
+      100% { opacity: 1; transform: translateY(0); }
+    }
+    .footer {
+      position: fixed; bottom: 24px; left: 0; width: 100%;
+      text-align: center; z-index: 1;
+      color: rgba(255,255,255,0.3); font-size: 13px;
+      opacity: 0;
+      animation: fadeInUp 1.2s ease-out 1.8s forwards;
+    }
+  </style>
+</head>
+<body>
+  <!-- 粒子背景 -->
+  <div class="particles" id="particles"></div>
+
+  <!-- 主体内容 -->
+  <div class="main-content">
+    <h1 class="welcome-text">欢迎来到 EBS 待办工作站</h1>
+    <p class="welcome-sub">高效开发 · 有序工作</p>
+    <a href="/list" class="btn-start">📋 待办列表</a>
+  </div>
+
+  
+  <script>
+    // 生成浮动粒子
+    (function() {
+      var container = document.getElementById("particles");
+      var colors = ["rgba(78,205,196,", "rgba(255,255,255,", "rgba(100,180,255,"];
+      for (var i = 0; i < 40; i++) {
+        var el = document.createElement("div");
+        el.className = "particle";
+        var size = Math.random() * 6 + 2;
+        el.style.width = size + "px";
+        el.style.height = size + "px";
+        el.style.left = Math.random() * 100 + "%";
+        el.style.animationDuration = (Math.random() * 12 + 8) + "s";
+        el.style.animationDelay = (Math.random() * 10) + "s";
+        var alpha = (Math.random() * 0.12 + 0.04).toFixed(2);
+        var colorIdx = Math.floor(Math.random() * colors.length);
+        el.style.background = colors[colorIdx] + alpha + ")";
+        container.appendChild(el);
+      }
+    })();
+  </script>
+</body>
+</html>
+  `);
 });
 
 // /add 路由 —— 返回添加待办的 HTML 表单页面
