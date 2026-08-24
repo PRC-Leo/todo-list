@@ -5,6 +5,11 @@
 
 const express = require("express");
 const mariadb = require("mariadb");
+const config = require("./config/config.js");
+const fs = require("fs");
+const http = require("http");
+const https = require("https");
+const path = require("path");
 
 // ------------------------------------------------------------
 // 1. 创建 Express 应用实例
@@ -23,14 +28,17 @@ app.use(express.urlencoded({ extended: true }));
 // 3. 创建 MariaDB 数据库连接池
 // ------------------------------------------------------------
 const pool = mariadb.createPool({
-  host: "localhost",        // 数据库主机地址
-  port: 3306,               // 数据库端口（MariaDB/MySQL 默认端口）
-  user: "root",             // 数据库用户名
-  password: "123456",       // 数据库密码
-  database: "ljz-data",     // 使用的数据库名称
-  connectionLimit: 10,      // 连接池最大连接数
-  acquireTimeout: 10000,    // 获取连接的超时时间（毫秒）
+  host: config.db.host,
+  port: config.db.port,
+  user: config.db.user,
+  password: config.db.password,
+  database: config.db.database,
+  connectionLimit: config.db.connectionLimit,
+  acquireTimeout: config.db.acquireTimeout,
 });
+
+// 数据表名（统一引用，便于改名）
+const TABLE = config.db.table;
 
 // ------------------------------------------------------------
 // 4. 初始化数据库 —— 自动创建 todos 数据表（如果不存在）
@@ -42,7 +50,7 @@ async function initDatabase() {
 
     // 创建 todos 表的 SQL 语句（如果表已存在则跳过）
     const createTableSQL = `
-      CREATE TABLE IF NOT EXISTS todos (
+      CREATE TABLE IF NOT EXISTS ${TABLE} (
         id          INT AUTO_INCREMENT PRIMARY KEY COMMENT '任务ID，自增主键',
         title       VARCHAR(255)  NOT NULL    COMMENT '任务标题',
         description TEXT          NULL        COMMENT '具体事项描述',
@@ -55,10 +63,10 @@ async function initDatabase() {
     `;
 
     await conn.query(createTableSQL);
-    console.log("✅ 数据表 todos 已就绪（ljz-data.todos）。");
+    console.log(`✅ 数据表 ${TABLE} 已就绪（${config.db.database}.${TABLE}）。`);
   } catch (err) {
     console.error("❌ 数据库初始化失败：", err.message);
-    console.error("   请确保 MariaDB 服务已启动，且数据库 ljz-data 已创建。");
+    console.error("   请确保 MariaDB 服务已启动，且数据库 " + config.db.database + " 已创建。");
   } finally {
     if (conn) conn.release();
   }
@@ -72,7 +80,7 @@ async function testDatabaseConnection() {
   try {
     conn = await pool.getConnection();
     console.log("✅ 数据库连接成功！MariaDB 连接池已就绪。");
-    console.log(`   主机：localhost:3306 | 数据库：ljz-data`);
+    console.log(`   主机：${config.db.host}:${config.db.port} | 数据库：${config.db.database}`);
   } catch (err) {
     console.error("❌ 数据库连接失败：", err.message);
   } finally {
@@ -85,8 +93,9 @@ async function testDatabaseConnection() {
 // ------------------------------------------------------------
 function getUTC8Time() {
   const now = new Date();
-  // UTC+8 = 当前 UTC 毫秒数 + 8 小时偏移
-  const utc8 = new Date(now.getTime() + 8 * 60 * 60 * 1000);
+  // 按配置的时区偏移（小时）计算，默认 UTC+8
+  const offsetMs = config.timezoneOffsetHours * 60 * 60 * 1000;
+  const utc8 = new Date(now.getTime() + offsetMs);
   // 转换为 MySQL DATETIME 格式：YYYY-MM-DD HH:mm:ss
   return utc8.toISOString().replace("T", " ").substring(0, 19);
 }
@@ -101,7 +110,7 @@ async function insertTodo({ title, description, category, color, completed }) {
 
     const now = getUTC8Time();
     const sql = `
-      INSERT INTO todos (title, description, category, color, completed, created_at, updated_at)
+      INSERT INTO ${TABLE} (title, description, category, color, completed, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `;
     const params = [
@@ -119,7 +128,7 @@ async function insertTodo({ title, description, category, color, completed }) {
     const insertedId = Number(result.insertId);
 
     // 查询刚插入的记录，返回完整数据
-    const [row] = await conn.query("SELECT * FROM todos WHERE id = ?", [insertedId]);
+    const [row] = await conn.query(`SELECT * FROM ${TABLE} WHERE id = ?`, [insertedId]);
 
     return {
       success: true,
@@ -164,7 +173,7 @@ async function getAllTodos() {
     conn = await pool.getConnection();
     // 按创建时间倒序排列，最新的在上面
     const rows = await conn.query(
-      "SELECT * FROM todos ORDER BY created_at DESC"
+      `SELECT * FROM ${TABLE} ORDER BY created_at DESC`
     );
     return {
       success: true,
@@ -188,7 +197,7 @@ async function toggleTodoStatus(id) {
 
     // 先查询当前状态
     const [current] = await conn.query(
-      "SELECT completed FROM todos WHERE id = ?",
+      `SELECT completed FROM ${TABLE} WHERE id = ?`,
       [id]
     );
     if (!current) {
@@ -200,12 +209,12 @@ async function toggleTodoStatus(id) {
     const now = getUTC8Time();
 
     await conn.query(
-      "UPDATE todos SET completed = ?, updated_at = ? WHERE id = ?",
+      `UPDATE ${TABLE} SET completed = ?, updated_at = ? WHERE id = ?`,
       [newCompleted, now, id]
     );
 
     // 返回更新后的完整记录
-    const [row] = await conn.query("SELECT * FROM todos WHERE id = ?", [id]);
+    const [row] = await conn.query(`SELECT * FROM ${TABLE} WHERE id = ?`, [id]);
     return { success: true, data: formatTodoRow(row) };
   } catch (err) {
     return { success: false, error: err.message };
@@ -223,7 +232,7 @@ async function updateTodo(id, fields) {
     conn = await pool.getConnection();
 
     // 先检查记录是否存在
-    const [existing] = await conn.query("SELECT id FROM todos WHERE id = ?", [id]);
+    const [existing] = await conn.query(`SELECT id FROM ${TABLE} WHERE id = ?`, [id]);
     if (!existing) {
       return { success: false, error: "未找到该待办任务，ID=" + id };
     }
@@ -260,12 +269,12 @@ async function updateTodo(id, fields) {
     params.push(id);
 
     await conn.query(
-      `UPDATE todos SET ${setClauses.join(", ")} WHERE id = ?`,
+      `UPDATE ${TABLE} SET ${setClauses.join(", ")} WHERE id = ?`,
       params
     );
 
     // 返回更新后的完整记录
-    const [row] = await conn.query("SELECT * FROM todos WHERE id = ?", [id]);
+    const [row] = await conn.query(`SELECT * FROM ${TABLE} WHERE id = ?`, [id]);
     return { success: true, data: formatTodoRow(row) };
   } catch (err) {
     return { success: false, error: err.message };
@@ -279,13 +288,7 @@ async function updateTodo(id, fields) {
 // ------------------------------------------------------------
 
 // 紧急程度颜色映射表
-const URGENCY_MAP = {
-  "#AAAAAA": { label: "无",    cssColor: "#AAAAAA" },
-  "#28A745": { label: "不急",  cssColor: "#28A745" },
-  "#007BFF": { label: "中等",  cssColor: "#007BFF" },
-  "#FFC107": { label: "紧急",  cssColor: "#FFC107" },
-  "#DC3545": { label: "最高",  cssColor: "#DC3545" },
-};
+const URGENCY_MAP = config.urgencyMap;
 
 // HTML 转义（服务端渲染用）
 function escapeHtmlForServer(text) {
@@ -313,7 +316,7 @@ async function getTodoById(id) {
   let conn;
   try {
     conn = await pool.getConnection();
-    const [row] = await conn.query("SELECT * FROM todos WHERE id = ?", [id]);
+    const [row] = await conn.query(`SELECT * FROM ${TABLE} WHERE id = ?`, [id]);
     if (!row) {
       return { success: false, error: "未找到该待办任务，ID=" + id };
     }
@@ -562,11 +565,11 @@ async function deleteTodo(id) {
   let conn;
   try {
     conn = await pool.getConnection();
-    const [existing] = await conn.query("SELECT id FROM todos WHERE id = ?", [id]);
+    const [existing] = await conn.query(`SELECT id FROM ${TABLE} WHERE id = ?`, [id]);
     if (!existing) {
       return { success: false, error: "未找到该待办任务，ID=" + id };
     }
-    await conn.query("DELETE FROM todos WHERE id = ?", [id]);
+    await conn.query(`DELETE FROM ${TABLE} WHERE id = ?`, [id]);
     return { success: true, message: "已删除 ID=" + id + " 的待办任务" };
   } catch (err) {
     return { success: false, error: err.message };
@@ -913,16 +916,7 @@ app.get("/add", (req, res) => {
         <label for="category">分类</label>
         <select id="category" name="category" onchange="handleCategoryChange()">
           <option value="">-- 请选择分类 --</option>
-          <option value="前端开发">前端开发</option>
-          <option value="后端开发">后端开发</option>
-          <option value="UI设计">UI设计</option>
-          <option value="DevOps">DevOps</option>
-          <option value="文档">文档</option>
-          <option value="Bug修复">Bug修复</option>
-          <option value="代码审查">代码审查</option>
-          <option value="学习研究">学习研究</option>
-          <option value="会议">会议</option>
-          <option value="其他">其他</option>
+          ${config.categories.map((c) => `          <option value="${c}">${c}</option>`).join("\n")}
           <option value="__custom__">✏️ 自定义分类……</option>
         </select>
         <input type="text" id="category_custom" name="category_custom"
@@ -1242,13 +1236,7 @@ app.get("/list", (req, res) => {
 
   <script>
     // 紧急程度颜色映射表（中文标签）
-    const URGENCY_MAP = {
-      "#AAAAAA": { label: "无",    cssColor: "#AAAAAA" },
-      "#28A745": { label: "不急",  cssColor: "#28A745" },
-      "#007BFF": { label: "中等",  cssColor: "#007BFF" },
-      "#FFC107": { label: "紧急",  cssColor: "#FFC107" },
-      "#DC3545": { label: "最高",  cssColor: "#DC3545" },
-    };
+    const URGENCY_MAP = ${JSON.stringify(config.urgencyMap)};
 
     // 加载待办列表
     async function loadTodos() {
@@ -1578,20 +1566,87 @@ app.use((err, req, res, next) => {
 });
 
 // ------------------------------------------------------------
-// 17. 启动服务器
+// 17. 启动服务器（HTTP / HTTPS）
 // ------------------------------------------------------------
-const PORT = 5580;
+const PORT = config.port;
+const httpsConfig = config.https || { enabled: false };
 
-app.listen(PORT, async () => {
-  console.log("============================================");
-  console.log("🚀 Todo List 后端服务启动完毕！");
-  console.log(`📍 访问地址：http://localhost:${PORT}`);
-  console.log(`📋 添加待办：http://localhost:${PORT}/add`);
-  console.log(`📖 待办列表：http://localhost:${PORT}/list`);
-  console.log("============================================");
+// 计算完整访问地址（带协议与端口）
+function buildAccessUrl(protocol, urlPath) {
+  const defaultPort = protocol === "https" ? 443 : 80;
+  const portPart = PORT === defaultPort ? "" : ":" + PORT;
+  return `${protocol}://localhost${portPart}${urlPath}`;
+}
 
-  // 测试数据库连接
+// 启动后初始化：测试数据库连接 + 自动建表
+async function afterStart() {
   await testDatabaseConnection();
-  // 初始化数据库表结构
   await initDatabase();
-});
+}
+
+if (httpsConfig.enabled) {
+  // -------- HTTPS 模式 --------
+  let tlsOptions = null;
+  try {
+    const key = fs.readFileSync(path.join(__dirname, httpsConfig.keyPath));
+    const cert = fs.readFileSync(path.join(__dirname, httpsConfig.certPath));
+    tlsOptions = { key, cert };
+  } catch (err) {
+    console.error("❌ 读取 HTTPS 证书失败：" + err.message);
+    console.error("   请检查 config.https.keyPath / certPath 是否存在。");
+    console.error("   ⚠️ 暂回退为 HTTP 模式启动。");
+  }
+
+  if (tlsOptions) {
+    // HTTPS 主服务
+    https.createServer(tlsOptions, app).listen(PORT, async () => {
+      console.log("============================================");
+      console.log("🚀 Todo List 后端服务启动完毕（HTTPS）！");
+      console.log("🔒 HTTPS 已启用（自签名证书）。");
+      console.log(`📍 访问地址：${buildAccessUrl("https", "")}`);
+      console.log(`📋 添加待办：${buildAccessUrl("https", "/add")}`);
+      console.log(`📖 待办列表：${buildAccessUrl("https", "/list")}`);
+      console.log("   首次访问浏览器会提示证书不受信任，点击「高级 → 继续」即可。");
+      console.log("============================================");
+      await afterStart();
+    });
+
+    // 可选：HTTP → HTTPS 跳转服务
+    if (httpsConfig.redirectHttp) {
+      const redirPort = httpsConfig.httpRedirectPort || 8080;
+      http.createServer((req, res) => {
+        const host = (req.headers.host || "localhost").split(":")[0];
+        const portPart = PORT === 443 ? "" : ":" + PORT;
+        const target = "https://" + host + portPart + req.url;
+        res.writeHead(301, { Location: target, "Content-Length": "0" });
+        res.end();
+      }).listen(redirPort, () => {
+        const fromPart = redirPort === 80 ? "" : ":" + redirPort;
+        const toPart = PORT === 443 ? "" : ":" + PORT;
+        console.log(`↩️  HTTP→HTTPS 跳转服务已启动：http://localhost${fromPart} → https://localhost${toPart}`);
+      });
+    }
+  } else {
+    // 证书缺失：回退 HTTP
+    app.listen(PORT, async () => {
+      console.log("============================================");
+      console.log("🚀 Todo List 后端服务启动完毕（HTTP 回退模式）！");
+      console.log(`📍 访问地址：${buildAccessUrl("http", "")}`);
+      console.log(`📋 添加待办：${buildAccessUrl("http", "/add")}`);
+      console.log(`📖 待办列表：${buildAccessUrl("http", "/list")}`);
+      console.log("============================================");
+      await afterStart();
+    });
+  }
+} else {
+  // -------- HTTP 模式（保持原行为）--------
+  app.listen(PORT, async () => {
+    console.log("============================================");
+    console.log("🚀 Todo List 后端服务启动完毕！");
+    console.log(`📍 访问地址：${buildAccessUrl("http", "")}`);
+    console.log(`📋 添加待办：${buildAccessUrl("http", "/add")}`);
+    console.log(`📖 待办列表：${buildAccessUrl("http", "/list")}`);
+    console.log("============================================");
+    await afterStart();
+  });
+}

@@ -13,7 +13,8 @@
 | **运行环境** | Node.js v24+ |
 | **框架** | Express v5 |
 | **数据库** | MariaDB（兼容 MySQL） |
-| **默认端口** | `5580` |
+| **默认端口** | `6767` |
+| **协议** | HTTPS（自签名证书），另在 `8080` 提供 HTTP→HTTPS 跳转 |
 | **时区** | UTC+8 |
 
 ---
@@ -47,57 +48,82 @@ npm install
 
 ### 3. 配置参数
 
-所有配置在 `server.js` 文件中修改。主要配置项：
+所有可配置参数集中在 **`config/config.js`** 中。`server.js` 启动时通过 `require("./config/config.js")` 读取，修改配置无需改动源码。
 
-#### 数据库连接池（第 25-33 行）
+`config/config.js` 顶层结构：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `db` | object | 数据库连接池配置 |
+| `port` | number | 服务监听端口 |
+| `https` | object | HTTPS 配置（证书路径、HTTP 跳转服务） |
+| `timezoneOffsetHours` | number | 时区偏移（小时），`8` 即 UTC+8 |
+| `urgencyMap` | object | 紧急程度颜色映射 |
+| `categories` | string[] | 分类预设列表 |
+
+#### 数据库连接池
+
+在 `config.db` 中修改：
 
 ```js
-const pool = mariadb.createPool({
-  host: "localhost",        // 数据库主机地址
-  port: 3306,               // 数据库端口（MariaDB/MySQL 默认 3306）
-  user: "root",             // 数据库用户名
-  password: "123456",       // 数据库密码
-  database: "ljz-data",     // 使用的数据库名称
-  connectionLimit: 10,      // 连接池最大连接数
-  acquireTimeout: 10000,    // 获取连接的超时时间（毫秒）
-});
+db: {
+  host: "localhost",            // 数据库主机地址
+  port: 3306,                   // 数据库端口（MariaDB/MySQL 默认 3306）
+  user: "root",                 // 数据库用户名
+  password: "1204",             // 数据库密码
+  database: "ljz-data",         // 使用的数据库名称
+  table: "todos",               // 数据表名
+  connectionLimit: 10,          // 连接池最大连接数
+  acquireTimeout: 10000,        // 获取连接的超时时间（毫秒）
+}
 ```
 
-#### 服务端口（第 1398 行附近）
+#### 服务端口
 
 ```js
-const PORT = 5580;
+port: 6767,
 ```
-
-修改此值可更改服务监听端口。
 
 #### 数据表名
 
-数据表名为 `todos`（固定），在 `initDatabase()` 函数中自动创建，无需手动建表。
+```js
+table: "todos",
+```
+
+启动时由 `initDatabase()` 自动创建，无需手动建表。
 
 #### 时区
 
-所有时间使用 UTC+8，在 `getUTC8Time()` 函数中处理。
+```js
+timezoneOffsetHours: 8,   // UTC+8
+```
+
+所有时间按此偏移计算（`getUTC8Time()`）。
 
 #### 紧急程度颜色预设
 
-定义在 `URGENCY_MAP` 常量中（第 222-228 行）：
-
 ```js
-const URGENCY_MAP = {
-  "#AAAAAA": { label: "无" },
-  "#28A745": { label: "不急" },
-  "#007BFF": { label: "中等" },
-  "#FFC107": { label: "紧急" },
-  "#DC3545": { label: "最高" },
-};
+urgencyMap: {
+  "#AAAAAA": { label: "无",    cssColor: "#AAAAAA" },
+  "#28A745": { label: "不急",  cssColor: "#28A745" },
+  "#007BFF": { label: "中等",  cssColor: "#007BFF" },
+  "#FFC107": { label: "紧急",  cssColor: "#FFC107" },
+  "#DC3545": { label: "最高",  cssColor: "#DC3545" },
+}
 ```
+
+页面与服务端共用此映射（`/list` 页面通过 `JSON.stringify` 注入）。
 
 #### 分类预设
 
-定义在 `/add` 页面和 `/:id` 修改表单的 `<select>` 选项中：
+```js
+categories: [
+  "前端开发", "后端开发", "UI设计", "DevOps", "文档",
+  "Bug修复", "代码审查", "学习研究", "会议", "其他",
+]
+```
 
-`前端开发` `后端开发` `UI设计` `DevOps` `文档` `Bug修复` `代码审查` `学习研究` `会议` `其他` + 自定义
+`/add` 表单下拉选项由该列表生成，末尾自动附带「自定义分类」选项。
 
 ### 4. 启动服务
 
@@ -112,11 +138,14 @@ npm run dev
 启动成功后会显示：
 ```
 ============================================
-🚀 Todo List 后端服务启动完毕！
-📍 访问地址：http://localhost:5580
-📋 添加待办：http://localhost:5580/add
-📖 待办列表：http://localhost:5580/list
+🚀 Todo List 后端服务启动完毕（HTTPS）！
+🔒 HTTPS 已启用（自签名证书）。
+📍 访问地址：https://localhost:6767
+📋 添加待办：https://localhost:6767/add
+📖 待办列表：https://localhost:6767/list
+   首次访问浏览器会提示证书不受信任，点击「高级 → 继续」即可。
 ============================================
+↩️  HTTP→HTTPS 跳转服务已启动：http://localhost:8080 → https://localhost:6767
 ✅ 数据库连接成功！MariaDB 连接池已就绪。
    主机：localhost:3306 | 数据库：ljz-data
 ✅ 数据表 todos 已就绪（ljz-data.todos）。
@@ -126,20 +155,60 @@ npm run dev
 
 | 地址 | 页面 |
 |------|------|
-| `http://localhost:5580/` | 欢迎首页 GUI |
-| `http://localhost:5580/add` | 添加待办表单 |
-| `http://localhost:5580/list` | 待办任务列表 |
-| `http://localhost:5580/{id}` | 待办详情页（如 `/1`） |
+| `https://localhost:6767/` | 欢迎首页 GUI |
+| `https://localhost:6767/add` | 添加待办表单 |
+| `https://localhost:6767/list` | 待办任务列表 |
+| `https://localhost:6767/{id}` | 待办详情页（如 `/1`） |
+
+> 也可用 `http://localhost:8080` 访问，会自动 301 跳转到 HTTPS。
 
 ---
+
+## HTTPS 与证书说明
+
+本服务已升级为 HTTPS（自签名证书）。证书位于 `certs/`，已加入 `.gitignore` 不入库。
+
+`config/config.js` 中的 `https` 段控制 HTTPS 行为：
+
+```js
+https: {
+  enabled: true,              // 是否启用 HTTPS
+  keyPath: "certs/key.pem",   // 私钥路径（相对项目根目录）
+  certPath: "certs/cert.pem", // 证书路径
+  redirectHttp: true,         // 是否启动 HTTP→HTTPS 跳转
+  httpRedirectPort: 8080,     // 跳转服务端口
+}
+```
+
+- `enabled: false` 时仍以原 HTTP 模式启动（向后兼容）。
+- 证书读取失败时会打印错误并自动回退为 HTTP，保证服务可用。
+- 首次用浏览器访问 `https://localhost:6767` 会提示证书不受信任，依次点击「高级 → 继续前往 localhost」即可。
+
+### 重新生成自签名证书
+
+使用随 Git 附带的 OpenSSL（如 `D:\Git\usr\bin\openssl.exe`）：
+
+```bash
+openssl req -x509 -newkey rsa:2048 -nodes -days 825 \
+  -keyout certs/key.pem -out certs/cert.pem \
+  -subj "/CN=localhost" \
+  -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
+```
+
+### 生产环境建议
+
+自签名证书仅适用于本地/内网。正式域名部署建议用 Let's Encrypt（Certbot）或 [mkcert](https://github.com/FiloSottile/mkcert) 签发受信任证书，替换 `certs/` 内文件即可，无需改动代码。
 
 ## 常见部署问题
 
 | 问题 | 解决方案 |
 |------|----------|
-| ❌ 数据库连接失败 | 确保 MariaDB 服务已启动，检查 `host`/`port`/`user`/`password` 配置 |
+| ❌ 数据库连接失败 | 确保 MariaDB 服务已启动，检查 `config/config.js` 中 `db` 配置 |
 | ❌ 数据库 `ljz-data` 不存在 | 手动创建：`CREATE DATABASE IF NOT EXISTS \`ljz-data\` DEFAULT CHARSET utf8mb4;` |
-| ❌ 端口 5580 被占用 | 在 `server.js` 中修改 `const PORT = 5580;` 为其他端口 |
+| ❌ 端口 6767 被占用 | 在 `config/config.js` 中修改 `port` 为其他端口 |
+| ❌ HTTPS 证书读取失败 | 服务会自动回退为 HTTP；检查 `config/config.js` 中 `https.keyPath`/`certPath` 或重新生成证书 |
+| ❌ 端口 8080 被占用 | HTTP 跳转端口冲突；改 `https.httpRedirectPort` 或设 `https.redirectHttp: false` |
+| ❌ 浏览器提示证书不受信任 | 自签名证书的预期行为，点「高级 → 继续」即可；正式部署换受信任证书 |
 | ❌ `npm install` 失败 | 检查 Node.js 版本 ≥ v24，尝试 `npm install --registry https://registry.npmmirror.com` |
 | ❌ 页面中文乱码 | MariaDB 字符集需设置为 `utf8mb4` |
 
