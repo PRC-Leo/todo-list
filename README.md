@@ -16,6 +16,8 @@
 | **默认端口** | `6767` |
 | **协议** | HTTPS（自签名证书），另在 `8080` 提供 HTTP→HTTPS 跳转 |
 | **时区** | UTC+8 |
+| **登录** | `/login` 浏览器端哈希登录，后端二次哈希后存库；无注册通道 |
+| **管理后台** | `https://localhost:6768`，HTTP 跳转 `http://localhost:8081` |
 
 ---
 
@@ -45,6 +47,7 @@ npm install
 |------|------|------|
 | `express` | ^5.x | Web 框架 |
 | `mariadb` | ^3.x | MariaDB 数据库连接池 |
+| `geoip-lite` | ^2.x | 管理后台 IP 定位 |
 
 ### 3. 配置参数
 
@@ -60,6 +63,9 @@ npm install
 | `timezoneOffsetHours` | number | 时区偏移（小时），`8` 即 UTC+8 |
 | `urgencyMap` | object | 紧急程度颜色映射 |
 | `categories` | string[] | 分类预设列表 |
+| `auth` | object | 登录认证配置（用户表、会话表、登录历史表、Cookie、头像限制） |
+| `admin` | object | 管理后台配置（端口、证书、用户表、会话表、Cookie） |
+| `logging` | object | 主系统操作日志开关与日志表名 |
 
 #### 数据库连接池
 
@@ -83,6 +89,38 @@ db: {
 ```js
 port: 6767,
 ```
+
+#### 认证、密码与个人中心
+
+登录认证相关配置位于 `config.auth`：
+
+```js
+auth: {
+  usersTable: "todo_users",
+  sessionsTable: "todo_sessions",
+  loginHistoryTable: "todo_login_history",
+  cookieName: "sid",
+  sessionDays: 7,
+  locationLookup: true,
+  avatarMaxBytes: 512 * 1024,
+}
+```
+
+`avatarMaxBytes` 限制后端接收并保存的头像数据大小，默认 `512 KB`。浏览器会先把用户选择的长图裁剪并压缩为 256×256 WebP。
+
+密码不会以明文形式提交或保存：
+
+1. 浏览器计算 `clientHash = SHA-256(规范化账号:密码)` 并提交给后端。
+2. 后端再次计算 `v2:SHA-256(规范化账号:clientHash)` 后存入数据库。
+3. 登录校验兼容迁移前的旧 64 位十六进制哈希。
+
+密码哈希字段使用 `VARCHAR(128)`。服务启动时会自动将旧哈希升级为 `v2:` 二次哈希；也可手动执行幂等迁移：
+
+```bash
+npm run migrate:hash
+```
+
+重复执行不会再次加密已有记录。主系统和管理后台使用相同的密码存储规则。
 
 #### 数据表名
 
@@ -127,6 +165,8 @@ categories: [
 
 ### 4. 启动服务
 
+Windows 下可直接双击 `start.bat` 一键启动主系统和管理后台；脚本会先检测端口，已在运行的实例会自动跳过，不会重复启动。
+
 ```bash
 # 生产模式
 npm start
@@ -149,6 +189,7 @@ npm run dev
 ✅ 数据库连接成功！MariaDB 连接池已就绪。
    主机：localhost:3306 | 数据库：ljz-data
 ✅ 数据表 todos 已就绪（ljz-data.todos）。
+✅ 数据表 todo_login_history 已就绪（ljz-data.todo_login_history）。
 ```
 
 ### 5. 访问页面
@@ -161,6 +202,61 @@ npm run dev
 | `https://localhost:6767/{id}` | 待办详情页（如 `/1`） |
 
 > 也可用 `http://localhost:8080` 访问，会自动 301 跳转到 HTTPS。
+
+登录后，主系统页面右上角会显示用户头像菜单，支持：
+
+- 上传或恢复默认头像。浏览器会将图片居中裁剪并压缩为 256×256 WebP，后端校验格式和大小后保存到 `todo_users.avatar_data`。
+- 查看历史登录记录，包括设备、登录时间、IP 和 IP 定位。退出登录或会话过期后记录仍会保留。
+- 查看自己的操作日志。仅返回当前账号产生的主系统日志，支持中文自然语言展示和查看原始日志。
+- 退出登录。
+
+个人中心不需要单独页面，所有功能均从右上角头像菜单打开。
+
+### 6. 管理后台
+
+管理后台自身登录使用独立的端口、后台用户表/会话表和 Cookie（`admin_sid`），登录校验规则与主系统一致；后台的“用户管理/登录设备”读写主系统的 `auth.usersTable` / `auth.sessionsTable`（默认 `todo_users` / `todo_sessions`），“操作日志”读取 `logging.table`（默认 `operation_logs`）。
+
+```bash
+# 启动管理后台
+npm run admin
+
+# 开发模式（文件变更自动重启）
+npm run dev:admin
+```
+
+- 管理地址：`https://localhost:6768`
+- HTTP 跳转：`http://localhost:8081 -> https://localhost:6768`
+- 默认管理员：`admin / ebs_admin`（可在配置中修改，仅首次启动创建）
+- 左侧栏：用户管理、登录设备、操作日志
+- 用户管理：读写主系统用户列表、添加主系统用户、强制重置密码；添加用户时可设置 `user` 或 `admin` 级别，密码留空时默认 `123456`
+- 登录设备：展示账号、设备、时间、IP+定位；可强制踢下线
+- 操作日志：查看主系统的全部结构化日志，并在前端生成中文自然语言解释；数据库中不保存翻译文本
+- 重置主系统用户密码后，该用户的所有主系统登录会话会立即失效
+- 密码存储与校验规则与主系统一致：浏览器提交 `SHA-256(规范化账号:密码)`，后端二次哈希后以 `v2:` 格式存库
+
+管理后台配置集中在 `config.admin`：
+
+```js
+admin: {
+  port: 6768,                            // 管理后台 HTTPS 监听端口
+  https: {                              // 与主系统同一套证书
+    enabled: true,
+    keyPath: "certs/key.pem",
+    certPath: "certs/cert.pem",
+    redirectHttp: true,
+    httpRedirectPort: 8081,
+  },
+  usersTable: "admin_users",
+  sessionsTable: "admin_sessions",
+  cookieName: "admin_sid",
+  sessionDays: 7,
+  locationLookup: true,                 // 是否进行 IP 定位
+  initialAdmin: {
+    account: "admin",
+    password: "ebs_admin",
+  },
+}
+```
 
 ---
 
@@ -208,6 +304,8 @@ openssl req -x509 -newkey rsa:2048 -nodes -days 825 \
 | ❌ 端口 6767 被占用 | 在 `config/config.js` 中修改 `port` 为其他端口 |
 | ❌ HTTPS 证书读取失败 | 服务会自动回退为 HTTP；检查 `config/config.js` 中 `https.keyPath`/`certPath` 或重新生成证书 |
 | ❌ 端口 8080 被占用 | HTTP 跳转端口冲突；改 `https.httpRedirectPort` 或设 `https.redirectHttp: false` |
+| ❌ 管理后台端口 6768 被占用 | 修改 `admin.port` 为其他端口 |
+| ❌ 管理后台 HTTP 跳转 8081 被占用 | 修改 `admin.https.httpRedirectPort` 或设 `admin.https.redirectHttp: false` |
 | ❌ 浏览器提示证书不受信任 | 自签名证书的预期行为，点「高级 → 继续」即可；正式部署换受信任证书 |
 | ❌ `npm install` 失败 | 检查 Node.js 版本 ≥ v24，尝试 `npm install --registry https://registry.npmmirror.com` |
 | ❌ 页面中文乱码 | MariaDB 字符集需设置为 `utf8mb4` |
@@ -229,6 +327,92 @@ openssl req -x509 -newkey rsa:2048 -nodes -days 825 \
 | `created_at` | DATETIME | 创建时间，系统自动写入（UTC+8） |
 | `updated_at` | DATETIME | 更新时间，系统自动写入（UTC+8） |
 
+### 管理后台用户表 `admin_users`
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `id` | INT（自增主键） | 管理用户 ID |
+| `account` | VARCHAR(64) 唯一 | 规范化账号（小写、去首尾空格） |
+| `password_hash` | VARCHAR(128) | `v2:SHA-256(账号:clientHash)` 二次哈希 |
+| `level` | ENUM(`user`,`admin`) | 用户级别；`admin` 才能进入用户管理 |
+| `created_at` | DATETIME | 创建时间（UTC+8） |
+| `updated_at` | DATETIME | 更新时间（UTC+8） |
+| `last_login_at` | DATETIME NULL | 最近登录时间（UTC+8） |
+
+### 管理后台会话表 `admin_sessions`
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `token` | CHAR(64) 主键 | 随机会话令牌 |
+| `user_id` | INT | 关联管理用户 ID（级联删除） |
+| `device_label` | VARCHAR(200) | 从 User-Agent 解析出的设备名称 |
+| `user_agent` | VARCHAR(500) | 原始 User-Agent |
+| `ip_address` | VARCHAR(64) | 登录 IP |
+| `location` | VARCHAR(200) | IP 定位；内网显示「内网」，未识别显示「未知」 |
+| `created_at` | DATETIME | 会话创建时间（UTC+8） |
+| `expires_at` | DATETIME | 会话过期时间（UTC+8） |
+| `last_active_at` | DATETIME NULL | 最近活跃时间（UTC+8） |
+
+### 主系统用户表 `todo_users`
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `id` | INT（自增主键） | 用户 ID |
+| `account` | VARCHAR(64) 唯一 | 规范化账号（小写、去首尾空格） |
+| `password_hash` | VARCHAR(128) | `v2:SHA-256(账号:clientHash)` 二次哈希 |
+| `display_name` | VARCHAR(50) NULL | 展示名称 |
+| `avatar_data` | MEDIUMTEXT NULL | 自定义头像，保存为经过校验的图片 data URL |
+| `is_active` | BOOLEAN | 账号是否启用，默认 1 |
+| `level` | ENUM(`user`,`admin`) | 用户级别，默认 `user` |
+| `created_at` | DATETIME | 创建时间（UTC+8） |
+| `updated_at` | DATETIME | 更新时间（UTC+8） |
+| `last_login_at` | DATETIME NULL | 最近登录时间（UTC+8） |
+
+### 主系统会话表 `todo_sessions`
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `token` | CHAR(64) 主键 | 随机会话令牌 |
+| `user_id` | INT | 关联主系统用户 ID（级联删除） |
+| `device_label` | VARCHAR(200) | 从 User-Agent 解析出的设备名称 |
+| `user_agent` | VARCHAR(500) | 原始 User-Agent |
+| `ip_address` | VARCHAR(64) | 登录 IP |
+| `location` | VARCHAR(200) | IP 定位；内网显示「内网」，未识别显示「未知」 |
+| `created_at` | DATETIME | 会话创建时间（UTC+8） |
+| `expires_at` | DATETIME | 会话过期时间（UTC+8） |
+| `last_active_at` | DATETIME NULL | 最近活跃时间（UTC+8） |
+
+### 主系统登录历史表 `todo_login_history`
+
+成功登录时单独写入，不随会话退出或过期而删除。
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `id` | BIGINT（自增主键） | 登录历史 ID |
+| `user_id` | INT | 关联主系统用户 ID（用户删除时级联删除） |
+| `account` | VARCHAR(64) | 登录账号 |
+| `session_token` | CHAR(64) UNIQUE NULL | 对应会话令牌，仅用于避免重复写入 |
+| `device_label` | VARCHAR(200) | 从 User-Agent 解析出的设备名称 |
+| `user_agent` | VARCHAR(500) | 原始 User-Agent |
+| `ip_address` | VARCHAR(64) | 登录 IP |
+| `location` | VARCHAR(200) | IP 定位 |
+| `login_at` | DATETIME | 登录时间（UTC+8） |
+
+### 操作日志表 `operation_logs`
+
+只记录主系统操作，不记录管理后台自身的操作。数据库中只保存结构化原文，中文自然语言解释由前端动态生成。
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `id` | BIGINT（自增主键） | 日志 ID |
+| `source` | ENUM(`main`,`admin`) | 日志来源；当前业务只写入 `main` |
+| `account` | VARCHAR(64) | 操作账号 |
+| `action` | VARCHAR(64) | 操作标识，如 `main.todo.create` |
+| `raw_log` | TEXT | JSON 格式的结构化日志原文 |
+| `ip_address` | VARCHAR(64) NULL | 操作 IP |
+| `location` | VARCHAR(200) NULL | IP 定位 |
+| `created_at` | DATETIME | 操作时间（UTC+8） |
+
 ---
 
 ## API 接口
@@ -239,6 +423,69 @@ openssl req -x509 -newkey rsa:2048 -nodes -days 825 \
 GET /
 ```
 返回欢迎首页 HTML 页面（GUI）。
+
+### 登录
+
+```
+POST /api/login
+Content-Type: application/json
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `account` | string | ✅ | 登录账号 |
+| `passwordHash` | string | ✅ | 浏览器端计算出的 64 位 SHA-256 哈希 |
+
+登录成功后写入会话和登录历史，并通过 HttpOnly Cookie 保持登录态。
+
+### 当前用户
+
+```
+GET /api/auth/me
+```
+
+返回当前登录账号、展示名称、用户级别和头像数据；未登录返回 `401`。
+
+### 退出登录
+
+```
+POST /api/logout
+```
+
+删除当前会话和 Cookie。
+
+### 更新个人头像
+
+```
+PUT /api/me/avatar
+Content-Type: application/json
+```
+
+请求体：
+
+```json
+{
+  "avatarData": "data:image/webp;base64,..."
+}
+```
+
+支持 PNG、JPEG、WebP，后端会校验图片内容与大小。传入 `null` 可恢复默认头像。
+
+### 查看历史登录记录
+
+```
+GET /api/me/login-history?limit=30
+```
+
+只返回当前登录用户自己的记录，默认最多 30 条，最多可请求 100 条。
+
+### 查看个人操作日志
+
+```
+GET /api/me/activity?limit=50&offset=0
+```
+
+只返回当前账号产生的主系统操作日志，默认 50 条，单次最多 200 条。
 
 ### 获取所有待办
 

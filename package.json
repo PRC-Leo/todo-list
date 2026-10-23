@@ -5,7 +5,11 @@
   "main": "index.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node --watch server.js"
+    "dev": "node --watch server.js",
+    "seed:auth": "node scripts/seed-user.js",
+    "migrate:hash": "node scripts/migrate-password-hash.js",
+    "admin": "node admin-server.js",
+    "dev:admin": "node --watch admin-server.js"
   },
   "keywords": [],
   "author": "",
@@ -13,6 +17,7 @@
   "type": "commonjs",
   "dependencies": {
     "express": "^5.2.1",
+    "geoip-lite": "^2.0.3",
     "mariadb": "^3.5.3"
   }
 }
